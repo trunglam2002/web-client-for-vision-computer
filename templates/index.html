@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Webcam Upload</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+</head>
+<body>
+    <div class="webcam-container">
+        <video id="video" autoplay playsinline style="display: none;"></video>
+        <img id="current-frame" src="" alt="Current Frame" />
+        <button id="toggleCamera" style="display: none;">Switch Camera</button>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const currentFrame = document.getElementById('current-frame');
+        const toggleCameraButton = document.getElementById('toggleCamera');
+        const socket = io();
+        let currentFacingMode = 'user';
+
+        // Kiểm tra thiết bị
+        function isMobileDevice() {
+            return /Mobi|Android/i.test(navigator.userAgent);
+        }
+
+        // Đặt kích thước ảnh dựa trên thiết bị
+        if (isMobileDevice()) {
+            currentFrame.style.width = '540px';
+            currentFrame.style.height = '960px';
+            toggleCameraButton.style.display = 'block'; // Hiển thị nút chuyển camera trên thiết bị di động
+            console.log("Mobile device detected");
+        } else {
+            currentFrame.style.width = '640px';
+            currentFrame.style.height = '480px';
+            console.log("Desktop device detected");
+        }
+
+        // Khởi động webcam với camera được chọn
+        function startCamera(facingMode) {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode } })
+                .then(stream => {
+                    video.srcObject = stream;
+                    video.play(); // Đảm bảo video bắt đầu phát
+                })
+                .catch(err => {
+                    console.error("Error accessing webcam: ", err);
+                });
+        }
+
+        // Chuyển đổi giữa camera trước và sau
+        toggleCameraButton.addEventListener('click', () => {
+            currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            startCamera(currentFacingMode);
+        });
+
+        // Khởi động camera mặc định
+        startCamera(currentFacingMode);
+
+        // Gửi hình ảnh đến server qua WebSocket
+        const sendImageToServer = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320; // Giảm kích thước canvas
+            canvas.height = 240; // Giảm kích thước canvas
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob(blob => {
+                // Gửi hình ảnh dưới dạng nhị phân
+                socket.emit('image', blob);
+            }, 'image/jpeg', 0.7); // Giảm chất lượng hình ảnh
+        };
+
+        // Nhận hình ảnh đã xử lý từ server
+        socket.on('processed_image', (data) => {
+            const blob = new Blob([data], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            currentFrame.src = url; // Cập nhật src của img
+
+            // Giải phóng URL sau khi sử dụng
+            currentFrame.onload = () => {
+                URL.revokeObjectURL(url);
+            };
+        });
+
+        // Gọi hàm sendImageToServer mỗi 200ms (0.2 giây) để giảm tải
+        setInterval(sendImageToServer, 100); // Thay đổi thời gian nếu cần
+
+        // Kiểm tra kết nối WebSocket
+        socket.on('connect', () => {
+            console.log('Connected to server');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+        });
+    </script>
+</body>
+</html>
